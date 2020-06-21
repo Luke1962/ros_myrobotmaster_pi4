@@ -1,0 +1,24 @@
+<package format="2">
+    <name>edge_tpu</name>
+    <version>0.1.0</version>
+    <description>
+        This package has been derived from edgetpu_ros by Josh Veitch-Michaeli
+        but it has been adapted to 
+        a) show image with detections into opencv window
+        b) publish detections with 'dnn_detect'' messages format
+    </description>
+    <maintainer email="lcesarini1962@gmail.com">Luca Cesarini</maintainer>
+    <license>GPL</license>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <depend>rospy</depend>
+    <depend>std_msgs</depend>
+    <depend>sensor_msgs</depend>
+    <depend>vision_msgs</depend>
+    <depend>cv_bridge</depend>
+	
+<build_depend>message_generation</build_depend>
+<exec_depend>message_runtime</exec_depend>
+
+</package>

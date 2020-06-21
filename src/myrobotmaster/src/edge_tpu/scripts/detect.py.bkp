@@ -1,0 +1,330 @@
+#!/usr/bin/env python3.6
+import sys
+
+import edgetpu.detection.engine
+import PIL
+import numpy as np
+from cv_bridge import CvBridge, CvBridgeError
+from vision_msgs.msg import Detection2DArray, Detection2D, BoundingBox2D, ObjectHypothesisWithPose
+from sensor_msgs.msg import Image, CompressedImage
+from std_msgs.msg import String
+import time
+
+import rospy
+
+import roslib
+roslib.load_manifest("edge_tpu")
+from dnn_detect.msg import DetectedObject, DetectedObjectArray
+
+#print(sys.path)
+sys.path.remove('/opt/ros/melodic/lib/python2.7/dist-packages')# in order to import cv2 under python3
+import cv2
+#sys.path.append('/opt/ros/melodic/lib/python2.7/dist-packages') # append back in order to import rospy
+
+'''
+------------------------------------------------------------------------------------------------------
+TOOLS
+------------------------------------------------------------------------------------------------------
+'''
+
+class color:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    END = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+# Python program to convert a list to string using join() function 
+
+# Function to convert 
+def listToString(s): 
+
+    # initialize an empty string 
+    str1 = " "
+
+    # return string 
+    return (str1.join(s)) 
+
+# Driver code
+#s = ['Geeks', 'for', 'Geeks'] 
+#print(listToString(s)) 
+
+
+class tpu_detector:
+    blShowDetections =1
+    
+    def __init__(self, model, labels, threshold=0.5, device_path=None, blShowDetections= 1):
+        print("------------------")
+        print("sys.version:", sys.version)
+        print("------------------")
+        self.bridge = CvBridge()
+        rospy.loginfo("Loading model {}".format(model))
+        #self.image_sub = rospy.Subscriber(  "/camera/compressed", Image, self.callback)
+        self.image_sub = rospy.Subscriber("/camera/compressed", CompressedImage, self.callback,  queue_size=1)
+        rospy.loginfo("Subscribing to /camera/compressed")
+        self.threshold = threshold
+        rospy.loginfo("Soglia di riconoscimento {}".format(threshold))
+        self.engine = edgetpu.detection.engine.DetectionEngine(model) #self.engine = edgetpu.detection.engine.DetectionEngine(model,device_path)
+        rospy.loginfo("\n********\nEngine loaded\n*********")
+        self.load_labels(labels)
+        
+        # sostituiti con il mio tipo di messaggio
+        self.detection_pub = rospy.Publisher( 'detections', Detection2DArray, queue_size=10)
+        #self.imgWithDetections_pub = rospy.Publisher( 'imgwdetect', CompressedImage, queue_size=1)
+
+        self.dnn_detection_pub = rospy.Publisher('/dnn_objects', DetectedObjectArray, queue_size=10)
+        self.blShowDetections = blShowDetections
+
+
+
+    def load_labels(self, labels):
+        print ("loading labels from: ", labels)
+        with open(labels, 'r', encoding="utf-8") as f:
+            pairs = (l.strip().split(maxsplit=1) for l in f.readlines())
+            self.labels = dict((int(k), v) for k, v in pairs)
+        print(self.labels)
+
+    # def load_labels2(self, path):
+    #     p = re.compile(r'\s*(\d+)(.+)')
+    #     with open(path, 'r', encoding='utf-8') as f:
+    #         lines = (p.match(line).groups() for line in f.readlines())
+    #         return {int(num): text.strip() for num, text in lines}
+
+
+    #non funziona
+    def img_cv2_pub(self, cv_image):
+        #### Create CompressedIamge ####
+        msg = CompressedImage()
+        msg.header.stamp = rospy.Time.now()
+        msg.format = "jpeg"
+        #msg.data = np.array(cv2.imencode('.jpg', image_np)[1]).tostring()
+        
+        #msg.data = self.bridge.cv2_to_imgmsg(cv_image, encoding="passthrough")
+        #self.imgWithDetections_pub.publish(msg)
+        
+        try:
+            msg.data = self.bridge.cv2_to_imgmsg(cv_image, encoding="passthrough")
+            self.imgWithDetections_pub.publish(msg)
+            
+        except CvBridgeError as e:
+        	print(e)
+        
+        
+
+
+        
+
+
+    # draw the bounding box and label on the image
+    # da https://github.com/google-coral/examples-camera/blob/master/opencv/detect.py
+    def showDetections(self, cv2_im, objs, labels):
+        height, width, channels = cv2_im.shape
+        for obj in objs:
+            x0, y0, x1, y1 = obj.bounding_box.flatten().tolist()
+            print("Detect. Before scaling x :", x0,  x1 )
+            x0, y0, x1, y1 = int(
+                x0*width), int(y0*height), int(x1*width), int(y1*height)
+            print("Detect.                                      After scaling x0,x1 , xcenter:", x0,  x1 , (x0+x1)/2 )
+            percent = int(100 * obj.score)
+            label = '%d%% %s' % (percent, labels[obj.label_id])
+            # coord = ' [x0 %d, y0 %d, x1 %d, y1 %d]' % ( x0, y0, x1, y1)
+            
+            # print(label, coord)
+            centerX =  int((x0+x1)/2)
+            centerY =  int((y0+y1)/2)
+            cv2_im = cv2.rectangle(cv2_im, (x0, y0), (x1, y1), (0, 255, 0), 2)
+            cv2_im = cv2.circle(cv2_im, ( centerX ,centerY ),3, (0, 0,255 ), 4)
+            cv2_im = cv2.putText(cv2_im, label, (x0, y0+30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+        cv2.imshow("edge_tpu result", cv2_im)
+        cv2.waitKey(1) #necessario per visualizzare l'immagine
+        #self.img_cv2_pub(cv2_im)
+    '''
+    def publishDetections(self, results, cv_image, frame_id):
+        # Creo il messaggio ROS in uscita
+        detections = Detection2DArray()
+        now = rospy.get_rostime()
+
+        for detection in results:
+            print(".")
+
+            top_left, bottom_right = detection.bounding_box
+            min_x, min_y = top_left
+            max_x, max_y = bottom_right
+
+            imheight, imwidth, _ = cv_image.shape
+
+            min_x *= imwidth
+            max_x *= imwidth
+            min_y *= imheight
+            max_y *= imheight
+
+            centre_x = (max_x+min_x)/2.0
+            centre_y = (max_y+min_y)/2.0
+            height = max_y-min_y
+            width = max_x-min_x
+
+            if height <= 0 or width <= 0:
+                continue
+
+            bbox = BoundingBox2D()
+            bbox.center.x = centre_x
+            bbox.center.y = centre_y
+            bbox.size_x = width
+            bbox.size_y = height
+
+            hypothesis = ObjectHypothesisWithPose()
+            hypothesis.id = detection.label_id 
+            hypothesis.score = detection.score
+            hypothesis.pose.pose.position.x = centre_x
+            hypothesis.pose.pose.position.y = centre_y
+
+            # update the timestamp of the object
+            object = Detection2D()
+            object.header.stamp = now
+            object.header.frame_id = frame_id
+            object.results.append(hypothesis)
+            object.bbox = bbox
+            object.source_img.header.frame_id = frame_id
+            object.source_img.header.stamp = now
+            object.source_img.height = int(height)
+            object.source_img.width = int(width)
+            object.source_img.encoding = "rgb8"
+            object.source_img.step = int(width*3)
+            object.source_img.data = cv_image[int(min_y):int(
+                max_y), int(min_x):int(max_x)].tobytes()
+
+            detections.detections.append(object)
+
+        if len(results) > 0:
+            self.detection_pub.publish(detections)
+    '''
+    
+    ########################################################################
+    ## Pubblica se presenti le detections che poi vengono sottoscritte dal follower
+    ########################################################################
+    def publishDnnDetections(self, results, cv_image, frame_id):
+        # Creo il messaggio ROS in uscita
+        #detections = Detection2DArray()
+        dnn_detections=DetectedObjectArray()
+        now = rospy.get_rostime()
+
+        for detection in results:
+
+            top_left, bottom_right = detection.bounding_box
+            min_x, min_y = top_left
+            max_x, max_y = bottom_right
+
+            #scaling da 0..1 alle dimensioni dell'immagine
+            imheight, imwidth, _ = cv_image.shape
+
+            min_x *= imwidth
+            max_x *= imwidth
+            min_y *= imheight
+            max_y *= imheight
+
+            centre_x = (max_x+min_x)/2.0
+            centre_y = (max_y+min_y)/2.0
+            height = max_y-min_y
+            width = max_x-min_x
+
+            if height <= 0 or width <= 0:
+                continue
+
+            object = DetectedObject()
+            object.class_name = self.labels[detection.label_id]
+            object.confidence = detection.score
+            object.x_min = min_x
+            object.x_max = max_x
+            object.y_min = min_y
+            object.y_max = max_y
+
+            dnn_detections.objects.append(object)
+
+
+            # Print detected object
+            if ((object.class_name =='persona') or (object.class_name =='person')):
+                printcolor = color.GREEN
+            else:
+                 printcolor = color.BOLD
+                 
+            #label = '%f%% %s' % (object.confidence, object.class_name)
+            label = '%s %f%% %s %s' % (printcolor, object.confidence, object.class_name, color.END)
+            coord = ' [x0 %f, x1 %f, y0 %f, y1 %f]' % (
+                object.x_min, object.x_max, object.y_min, object.y_max)
+                
+
+
+            print(label, coord)
+                    
+
+        # pubblico solo se presenti detections
+        if len(results) > 0:
+            self.dnn_detection_pub.publish(dnn_detections)
+
+
+    ########################################################################
+    ## Image callback
+    ########################################################################
+    def callback(self, data):
+        try:
+            #cv_image = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
+            #cv_image = self.bridge.imgmsg_to_cv2(data, CV_8UC3)
+
+            # da ROS Compressed a Numpy Array
+            np_arr = np.fromstring(data.data, np.uint8)
+            # da Numpy Array a CV2
+            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        except CvBridgeError as e:
+            rospy.logerr(e)
+       	    print('.ros data format:',data.format)
+ 
+        ########################################################################
+        ## cuore della detection
+        ########################################################################
+        results = self.engine.DetectWithImage(PIL.Image.fromarray(
+            cv_image), top_k=1, threshold=self.threshold, keep_aspect_ratio=True, relative_coord=True)
+        ########################################################################
+        #print(results)
+
+        # visualizza le detection. include  self.img_cv2_pub( cv_image)
+        if self.blShowDetections > 0:
+            self.showDetections(cv_image, results, self.labels)
+        else:
+            print(color.BLUE+"Detected  " +  color.END)
+
+        # pubblica il messaggio ROS se ci sono detections        
+        self.publishDnnDetections(results, cv_image, data.header.frame_id)  #self.publishDetections(results, cv_image, data.header.frame_id)
+
+        #self.img_cv2_pub( cv_image)
+        #rospy.logdebug("%.2f ms" % self.engine.get_inference_time())
+
+
+def main( args):
+
+    rospy.init_node('detect', anonymous=True)
+
+    model_path = rospy.get_param(
+        '~model_path', default='/home/pi/ros/src/edgetpu_ros/models/mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite')
+    label_path = rospy.get_param(
+        '~label_path', default='/home/pi/ros/src/edgetpu_ros/models/coco_labels.txt')
+    threshold = rospy.get_param('~threshold', default=0.5)
+    device_path = rospy.get_param('~device_path', default=None)
+    blShowDetections = rospy.get_param('~show_detections', default=1)
+    detector = tpu_detector(model_path, label_path, threshold, device_path, blShowDetections)
+    if blShowDetections == 0:
+        print("Opencv Detection Window disabled")
+
+    try:
+        rospy.spin()
+    except KeyboardInterrupt:
+        print("Shutting down")
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main( sys.argv)

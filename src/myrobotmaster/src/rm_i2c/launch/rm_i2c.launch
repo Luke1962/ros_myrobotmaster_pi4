@@ -1,0 +1,15 @@
+<launch>
+	
+<!--	<node  name="battery_monitor"	pkg="rm_bat"	type="rm_bat"  launch-prefix="sudo   -E bash -c LD_LIBRARY_PATH=LD_LIBRARY_PATH:/opt/ros/melodic/lib/" 	output="screen">
+	
+		<param name="rate" value="2" />
+		<param name="sensorvolt_to_battery_factor" value="5.0" />
+	</node>  
+-->
+
+<node  name="rm_i2c"	pkg="rm_i2c"	type="rm_i2c"   output="screen">
+		<param name="node_rate_hz" value="0.5" />
+		<param name="sensorvolt_to_battery_factor" value="5.0" />
+		<param name="battery_print_interval_sec" value="5" />
+	</node>  
+</launch>

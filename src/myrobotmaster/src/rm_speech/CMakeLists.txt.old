@@ -1,0 +1,64 @@
+cmake_minimum_required(VERSION 2.8.3)
+project(rm_speech)
+
+#-----------------------------
+#find_path(ESPEAK_INCLUDE_DIRS
+    #NAMES speak_lib.h
+    #PATH_SUFFIXES espeak
+#)
+
+#find_library(ESPEAK_LIBRARIES
+    #NAMES espeak
+#)
+
+#mark_as_advanced(
+    #ESPEAK_INCLUDE_DIRS
+    #ESPEAK_LIBRARIES
+#)
+#--------------------------------
+ ############ Find ESPEAK TTS ############ 
+
+find_path(LIBESPEAK_INCLUDE_DIRS 
+          NAMES speak_lib.h
+          HINTS /usr/include/espeak /home/pi/sources/espeak-1.48.04-source/)
+find_library(LIBESPEAK_LIBRARIES
+             NAMES espeak
+             HINTS /usr/lib/ 
+             PATH_SUFFIXES lib)
+
+######################################## 
+
+
+find_package (Espeak)
+if (Espeak_FOUND)
+	include_directories(${Espeak_INCLUDE_DIRS})  #/usr/local/include/espeak
+endif(Espeak_FOUND)
+if (NOT Espeak_Found)
+	message(FATAL_ERROR "Package Espeak required, but not found!")
+endif(NOT Espeak_Found)
+
+
+
+
+find_package(catkin REQUIRED COMPONENTS std_msgs roscpp)
+find_library(
+  espeak REQUIRED
+) 
+catkin_package(
+   INCLUDE_DIRS include
+   LIBESPEAK_INCLUDE_DIRS
+   CATKIN_DEPENDS std_msgs roscpp espeak
+)
+
+include_directories(include
+  ${catkin_INCLUDE_DIRS}
+  ${espeak_INCLUDE_DIRS} 
+  
+)
+
+add_executable(rm_speech_node src/speech.cpp)
+
+target_link_libraries(rm_speech_node
+  ${catkin_LIBRARIES}
+  /usr/bin/espeak
+)

@@ -1,0 +1,125 @@
+# 
+node_rate: 2
+
+
+#speaking speed in word per minute.  Values 80 to 450.
+speech_rate: 160 
+
+#base pitch, range 0-99.  50=normal
+speech_pitch: 40 
+
+#espeakRANGE:   pitch range, range 0-100. 0-monotone, 50=normal
+speech_range: 90
+
+#frase iniziale allo startup
+#wellcome_speech: 'Ciao a tutti mi presento. Io sono Arkimede. Posso vedere, andare avanti, a destra, a sinistra e indietro.'
+wellcome_speech: 'Ciao sono pronto a parlare'
+
+speech_volume: 20 # tra 0 e 20
+
+#tipo di voce 'mb-it3' , 'klatt'
+speech_voice: 'mb-it3' #tipo robotico
+speech_voice: 'mb-it4' #tipo maggiordomo  ma bisogna il rate 
+
+#aplay_device: 'default'
+aplay_device: 'default'
+
+
+
+#     const int  MAX_SPEECH_CODES=50;
+#   const int MAX_SPEECH_ALTERNATIVES=10;
+# la prima voce e' quella di avvio
+speech_coded_list:    [
+'speech_startup',       #1
+'speech_bumpers' ,      #2
+
+'speech_bat_charged',   #3
+'speech_bat_low' ,      #4
+'speech_bat_empty',     #5
+
+'speech_faretto_on',    #6
+
+'speech_ciao'         , #7
+'speech_ciao_luca'    , #8
+'speech_ciao_vinicia'  , #9
+'speech_ciao_angelica', #10
+
+'speech_laser_on'    , #11
+'speech_laser_off'   , #12
+'speech_cmd_unknown' , #13
+'speech_cmd_done'    , #14
+'speech_cmd_stop'    , #15
+'speech_help'        , #16
+
+'speech_f_destra'    , #17
+'speech_f_sinistra'  , #18
+'speech_f_lontano'   , #19
+'speech_f_vicino'    , #20
+'speech_f_giusto'    , #21
+
+'speech_f_perso'     , #22
+'speech_f_movimento' , #23
+'speech_f_nessuno'   , #24
+'speech_f_pronto'    , #25
+'speech_f_visto'     , #26
+
+
+
+'speech_f_start'     , #27
+'speech_f_stop'      , #28
+'speech_plug_on'     , #29
+'speech_plug_off'    , #30
+'speech_name'          #31
+ ]
+ 
+##########################################################################
+##########################################################################
+###      N O N    U S A R E    C A R A T T E R I   A C C E N T A T I   ###
+##########################################################################
+##########################################################################
+
+speech_name:       ['Ciao io mi chiamo Archimede','Io sono archimede, come il grande inventore ','Ciao il mio padrone mi ha dato il nome di Archimede','Archimede ']
+
+speech_startup:       ['Eccomi....sono pronto a parlare','Ciao... ora posso parlare','Ciao a tutti eccomi qui','Buongiorno','Che bello ...Ora ho la voce']
+speech_cmd_unknown:   ['Spiacente...comando sconosciuto','Sorry non ancora in grado di eseguire questo comando','comando sconosciuto','Desolato...comando sconosciuto']
+
+speech_bumpers:       ['oops', 'scusa', 'ostacolo', 'cosa ho fatto?']
+speech_bat_charged:   ['Batteria carica','Finalmente sono carico','Sono carico. Puoi scollegare la batteria']
+speech_bat_low:       [ 'Batteria meno del trenta percento','Batteria quasi scarica','<prosody rate="x-slow"> ho fame di energia</prosody>','Sono quasi scarico','sarebbe ora di collegare il caricabatteria']
+speech_bat_empty:     ['Batteria completamente carica','<prosody rate="x-slow"> Aiuto sono scarico</prosody>','aiuto <emphasis level="reduced">Aiuto </emphasis>  sono scaaaaarico','Sono scarico','Per favore collega il caricabatteria']
+
+speech_faretto_on:    ['Faretto acceso','E luce fu','Ho acceso le luci', 'ho acceso il faretto', 'LUCE ACCESA']
+speech_faretto_off:   ['Faretto spento','E buio fu','Ho spento le luci', 'ho spento il faretto', 'luce spenta']
+speech_laser_on:      ['laser acceso','Si dai facciamo un po di ambiente disco','Ho acceso il laser', 'ho acceso il laser']
+speech_laser_off:     ['laser spento','okei spengo il laser, ma era bello','Ho spento il laser', 'ho spento il laser']
+
+speech_ciao:          ['ciao', 'hei come andiamo?' , 'buongiorno chi sei?' , 'come va?']
+speech_ciao_luca:     ['ciaooo Luca', 'ciaoo  luca  mio creatore', 'ciao luca mio signore' , 'ciao Luca mio padrone', 'ciao grande Luca']
+speech_ciao_vinicia:  ['ciao vinicia quanto la tua presenza bella he', 'ciao  vinicia luce dei miei occhi', 'ciao amore  amore infinito del mio padrone' , 'ciao mia <prosody pitch="high" rate="1%"> bella </prosody>signora']
+speech_ciao_angelica: ['ciao angi', 'ciao angioletto', 'ciao  angelica adorata figlia di luca', 'ciao angelo mio' , 'ciao mia bella ragazza']
+
+speech_cmd_done:      ['fatto','comando completato','ochei']
+speech_cmd_stop:      ['ochei mi sono fermato','fatto','ochei']
+speech_help:          ['i comandi sono tanti. prova questi: vai avanti o indietro e gira a destra o a sinistra', 'posso eseguire tanti comandi. prova accendi o spegni il faretto.', ' prova a chiedere qualcosa sulla batteria']  
+
+# follower
+speech_f_start:       ['che bello venirti dietro', 'ti seguo con piacere', 'ora ti seguo']
+speech_f_stop:        ['va bene smetto di seguirti', 'mi dispiace non poterti piu seguire', 'okei non ti seguo piu']
+speech_f_destra:      ['sei a destra', 'destra', 'ti vedo a destra']
+speech_f_sinistra:    ['sei a sinistra', 'sinistra', 'ti vedo a sinistra']
+
+speech_f_lontano:     ['sei lontano','sei lontano <prosody pitch="high" rate="1%"> dove scappi </prosody>', 'rallenta per favore. sei lontano']
+speech_f_vicino:      ['sei troppo vicino','ti puzza un po troppo lalito','per favore manteniamo le distanze','sei tanto vicino che ti vedo le tonsille', 'non voglio che mi attacchi il corona virus' ]
+speech_f_giusto:      ['ochei non ti muovere','stai fermo sono stanco di inseguirti','eccomi al tuo fianco', 'fermo cosiii']
+
+speech_f_perso:       ['ti ho perso','non ti vedo. provo a guardarmi intorno', 'non ti vedo', 'dove sei?']
+speech_f_movimento:   ['Qualcuno si muove','<prosody rate="1%">chi si muove</prosody>','qualcuno si trova nella stanza', 'sento la presenza di qualcuno']
+speech_f_nessuno:     ['Non trovo nessuno. mi fermo','mi sento solo', 'se non ce nessuno mi sento un pochino solo','Nessuno nella stanza. mi fermo e spenso alla mia solitudine']
+speech_f_pronto:      ['sono pronto ' ,'io sono nato pronto','eccomi a disposizione', 'pronto prontissimo']
+speech_f_visto:       ['eccoti' ,'ti vedo','ora ti vedo', 'eii eccoti qui']
+
+speech_plug_on:       ['Evviva la paaappa', 'Finalmente un po di carica', 'Hai collegato il carica batteria. Graazie']
+speech_plug_off:      ['Evviva sono libero di muovermi','Grazie per avere staccato il cavo', 'Caricabatteria scollegato']
+#<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.w3.org/2001/10/synthesis http://www.w3.org/TR/speech-synthesis/synthesis.xsd">  </speak>
+#<prosody rate="x-slow"> Aiuto sono scaric</prosody>
+ 

@@ -1,0 +1,733 @@
+//build:      catkin_make -DCATKIN_WHITELIST_PACKAGES="enc2odom"
+//launch      roslaunch enc2odom enc2odom.launch
+#define NODENAME "enc2odom" //usato per recuperare i parametri
+
+#include <math.h>
+#include "ros/ros.h"
+#include <ros/console.h> //per ROS_INFO_THROTTLE  > http://wiki.ros.org/roscpp/Overview/Logging
+
+#include <std_msgs/String.h>
+#include <geometry_msgs/Vector3.h>
+#include <geometry_msgs/Vector3Stamped.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>		// per InitialPose
+
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
+#include <nav_msgs/Odometry.h>
+
+#include <ros/transport_hints.h>
+//usare ros::TransportHints().tcpNoDelay());
+
+//#include "parameters.h"
+#define ROBOT_WEEL_DISTANCE	0.335f						// distanza in m tra le due ruote
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// VARIABILI GLOBALI DEL PROGRAMMA ORIGINALE
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+
+
+/* double x;
+double y;
+double th;
+
+double vx;
+double vy;
+double vth;
+double deltaLeft;
+double deltaRight;
+ */
+
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+/// MACRO
+///  
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+	#define dbgf(...) printf(__VA_ARGS__)
+	# define ROS_NOW  ros::Time::now(); /*Arduino IDE: millis();*/
+
+
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+/// HELPERS
+///  
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+	template <typename T> int sign(T val) {
+		return (T(0) < val) - (val < T(0));
+	}
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+/// STRUTTURE DATI A LIVELLO DI SISTEMA
+///  
+/// ///////////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////////
+	struct encoder_t {
+		int32_t count;  // contatore cumulativo encoder 
+		int32_t countPrec ; //valore precedente
+		int deltaCount; // tick tra due misure
+		bool interruptFlag;
+		long last_change;
+	};
+
+	struct parameters_t
+	{
+		double enc2mm; // millimetri per ogni encoder tick
+		double wheelDistance;
+		float rosRate;
+		float dbg_throttle_enc_interval;
+		float dbg_throttle_odom_interval;
+		int queue_size;
+
+	} par;
+
+	struct System_t
+	{
+		parameters_t par;
+		encoder_t encR, encL;
+
+		std::string frame_id;
+		std::string ros_topic;
+		float odom_x; //posizione x
+		float odom_y; //posizione y
+		float odom_r; // rotazione in radianti
+		float deltaForward_m;
+		float deltaTheta_rad;
+		double deltaOdom_x;
+		double deltaOdom_y;
+		
+		float totaltravelDistance; //distanza percorsa a meno delle rotazioni
+		float vel_x;
+		float vel_y;
+		float twist_z;
+
+	};
+	static System_t thisSystem;
+
+	ros::Time current_time;
+	ros::Publisher pub_cmdVel;
+
+	// variabili per la gestione target pose
+	float controlTarget ;
+	float controlDemand;
+	float kpLin =0.5;
+	float kpAng =0.5;
+	
+	
+	geometry_msgs::Twist msg_spostamentoRichiesto; // delta spostamento richiesto in metri e gradi (non radianti)
+ 	geometry_msgs::Twist msg_cmdVel;	// comandi velocità
+
+
+ 	float targetTravel; // spostamento da inizio comando
+ 	float targetAngleRad;
+ 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// PID 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+ 
+
+
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// SPEECH 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+std_msgs::String msg_chatter;
+ros::Publisher pub_chatter; 
+ void speech(std::string msg) {
+  msg_chatter.data = msg;
+  pub_chatter.publish(msg_chatter);
+  //ROS_INFO("[SPEECH] %s", msg.c_str());
+}	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// INIZIALIZZAZIONE VARIABILI GLOBALI 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+	void init_globalVars()
+	{
+
+		thisSystem.ros_topic = "/odom";
+		thisSystem.frame_id = "base_link"; //strcpy(thisSystem.frame_id , "base_link"); //
+
+		thisSystem.encL.count = 0;
+		thisSystem.encR.count = 0;
+
+		thisSystem.odom_x = 0.0;
+		thisSystem.odom_y = 0.0;
+		thisSystem.odom_r = 0.0;
+
+		thisSystem.deltaForward_m = 0.0;
+		thisSystem.deltaTheta_rad = 0.0;
+		thisSystem.totaltravelDistance =0;
+
+		thisSystem.vel_x  =0.0;
+		thisSystem.vel_x  =0.0;
+		thisSystem.twist_z =0.0;
+
+		thisSystem.par.dbg_throttle_enc_interval= 1.0;
+		thisSystem.par.dbg_throttle_odom_interval= 1.0;
+
+		thisSystem.par.rosRate = 50;
+		//thisSystem.par.enc2mm = (double)1000 * ROBOT_STEPS2M / 4.0; // 4 TICK PER Step
+		thisSystem.par.enc2mm = 0.0645;
+		ROS_INFO("\n\n--- SETTING DEFAULT ENCODER CONVERSION PARAMETERS----\n enc2mm: %f\n\n", thisSystem.par.enc2mm);
+	
+		msg_spostamentoRichiesto.linear.x =0.0;
+		msg_spostamentoRichiesto.linear.y =0.0;		
+		msg_spostamentoRichiesto.linear.z =0.0;		
+		msg_spostamentoRichiesto.angular.x =0.0;
+		msg_spostamentoRichiesto.angular.y =0.0;		
+		msg_spostamentoRichiesto.angular.z =0.0;	
+	}
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// CALLBACK ENCODERS TICKS 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+	void cbk_encoders(const geometry_msgs::Vector3Stamped::ConstPtr &ticks)
+	{
+		thisSystem.encL.count = ticks->vector.x;
+		thisSystem.encR.count = ticks->vector.y;
+	}
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// R O S  PUBLISH   T F 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+
+	void publish_tf(double odom_x, double odom_y, double odom_r)
+	{
+
+		static tf2_ros::TransformBroadcaster tfbr;
+		geometry_msgs::TransformStamped tf;
+
+		tf.header.stamp =current_time;	// ros::Time::now();
+		tf.header.frame_id = "odom";
+		tf.child_frame_id = "base_link";
+
+		tf.transform.translation.x = odom_x;
+		tf.transform.translation.y = odom_y;
+		tf.transform.translation.z = 0.0;
+
+		geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(odom_r);
+		tf.transform.rotation = odom_quat;
+
+		tfbr.sendTransform(tf);
+	}
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// R O S  PUBLISH   cmd_vel
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+// calcola cmd_vel tenendo conto dei limiti
+	#define LINEAR_SPEED_LIMIT_LOWER 0.06 /* ms */
+	#define LINEAR_SPEED_LIMIT_UPPER 0.4 /* ms */
+	
+	#define ANGULAR_SPEED_LIMIT_LOWER 0.35  /* rad/s */
+	#define ANGULAR_SPEED_LIMIT_UPPER 2  /* rad/s */
+
+	geometry_msgs::Twist msg_fill_cmdVel(float lin_x, float ang_z)
+	{
+
+		geometry_msgs::Twist  msg_twist;
+  		msg_twist.linear.y = 0.0;
+  		msg_twist.linear.z = 0.0;
+ 		msg_twist.angular.x = 0.0;
+  		msg_twist.angular.y = 0.0;
+ 
+		if ( (lin_x != 0.0 ) && (abs(lin_x) < LINEAR_SPEED_LIMIT_LOWER) )
+		{
+			// limito inferiormente
+			msg_twist.linear.x =  sign(lin_x)* LINEAR_SPEED_LIMIT_LOWER;
+		}else if ( (lin_x != 0.0 ) && (abs(lin_x) > LINEAR_SPEED_LIMIT_UPPER))
+		{
+			// limito superiormente
+			msg_twist.linear.x =  sign(lin_x)* LINEAR_SPEED_LIMIT_UPPER;
+		}else
+		{
+			msg_twist.linear.x = lin_x;
+		}
+ 				
+
+ 		if ( (ang_z != 0.0 ) && (abs(ang_z) < ANGULAR_SPEED_LIMIT_LOWER)) 
+		{
+			msg_twist.angular.z =  sign(ang_z)* ANGULAR_SPEED_LIMIT_LOWER;
+		}else  if ( (ang_z != 0.0 ) && (abs(ang_z) > ANGULAR_SPEED_LIMIT_UPPER))
+		{
+			msg_twist.angular.z =  sign(ang_z)* ANGULAR_SPEED_LIMIT_UPPER;
+		}else
+		{
+			msg_twist.angular.z = ang_z;
+		} 		
+
+		return msg_twist;
+		
+	}
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// CALLBACK INITIALPOSE 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+//void cbk_estimatedPose( const geometry_msgs::PoseStamped& initialpose){
+	void cbk_setPose(const geometry_msgs::PoseWithCovarianceStamped &initialpose)
+	{
+		thisSystem.encL.countPrec =thisSystem.encL.count ;		thisSystem.encL.deltaCount = 0;
+		thisSystem.encR.countPrec =thisSystem.encR.count ;		thisSystem.encR.deltaCount = 0;
+
+
+		thisSystem.totaltravelDistance =0.0;
+		thisSystem.deltaOdom_x =0.0;
+		thisSystem.deltaOdom_y =0.0;
+		thisSystem.deltaForward_m=0.0;
+		
+		//robotOdom_set(initialpose.pose.pose.position , initialpose.pose.pose.orientation);
+		thisSystem.odom_x = initialpose.pose.pose.position.x;
+		thisSystem.odom_y = initialpose.pose.pose.position.y;
+
+		//---------------------------------------------------------------------
+		// th devo ricavarla invece dal Quaternion orientation ->Yaw
+		//!!! sbagliato fare  g_odom_th = initialpose.pose.pose.orientation.z;
+		tf::Quaternion q(
+			initialpose.pose.pose.orientation.x,
+			initialpose.pose.pose.orientation.y,
+			initialpose.pose.pose.orientation.z,
+			initialpose.pose.pose.orientation.w);
+		tf::Matrix3x3 m(q);
+		double roll, pitch, yaw;
+		m.getRPY(roll, pitch, yaw);
+		//-----------------------------------------------------------------
+
+		thisSystem.odom_r = yaw;
+
+		ROS_INFO("\nSetting pose to x:%f ,y:%f , th: %f", thisSystem.odom_x, thisSystem.odom_y, thisSystem.odom_r);
+		publish_tf(thisSystem.odom_x, thisSystem.odom_y, thisSystem.odom_r);
+	}
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// CALCOLO POSIZIONE ROBOT
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+	ros::Time current_time_encoder,last_time_encoder;
+	int lastPrintedEncCount ;
+	void robotPoseupdate(float distThreshold_mm = 5.0f)
+	{
+
+		//printf("\n robotPoseupdate ] thisSystem.encL.count:%d\n",	thisSystem.encL.count);
+
+		// Gestisco il caso in cui resetto gli encoders e posso passare da valori molto alti a 0
+		if ((thisSystem.encL.count + thisSystem.encR.count) == 0)
+		{
+			//sono all'inizio oppure ho appena resettato
+			thisSystem.encL.deltaCount = 0;
+			thisSystem.encR.deltaCount = 0;
+		}
+		else
+		{
+			//Aggiorno i contatori totali del sistema
+			thisSystem.encL.deltaCount = thisSystem.encL.count - thisSystem.encL.countPrec;
+			thisSystem.encR.deltaCount = thisSystem.encR.count - thisSystem.encR.countPrec;
+			
+			if  ( (abs(thisSystem.encL.deltaCount) + abs(thisSystem.encR.deltaCount)) != lastPrintedEncCount) {
+				//printf("\nENCODERS Delta cntL %d \t cntR %d\t", thisSystem.encL.deltaCount, thisSystem.encR.deltaCount);
+				lastPrintedEncCount =abs(thisSystem.encL.deltaCount) + abs(thisSystem.encR.deltaCount);
+			}
+			
+		}
+
+		// Calcolo gli spostamenti di ciascuna ruota rispetto al terreno
+		double dLmm = (double)thisSystem.encL.deltaCount * (double)thisSystem.par.enc2mm;
+		double dRmm = (double)thisSystem.encR.deltaCount * (double)thisSystem.par.enc2mm;
+		
+		//ROS_INFO_THROTTLE(1.0, "\ndL %f \t dR %f\n",dL , dR);
+		// printf("\ndL %f \t dR %f  \t ",dLmm ,dRmm);
+		// Se la base si è mossa di un minimo data da distThreshold
+		// aggiorno i calcoli e azzero deltacount
+		double deltaMotion = abs(dLmm) + abs(dRmm);
+		if (deltaMotion > distThreshold_mm) ///> 0 se si è mosso
+		{
+			//printf("\n\tdLmm %f \t dRmm %f\n", dLmm, dRmm);
+
+			thisSystem.encL.countPrec = thisSystem.encL.count;
+			thisSystem.encR.countPrec = thisSystem.encR.count;
+
+			thisSystem.encL.deltaCount = 0;
+			thisSystem.encR.deltaCount = 0;
+
+			/// ----------------------------------------
+			/// Delta spostamento rispetto al frame  base_link
+			/// ----------------------------------------
+			thisSystem.deltaForward_m = (double)0.5 * (dLmm + dRmm) / 1000.0f;
+			//thisSystem.deltaTheta_rad = (dLmm - dRmm) / ((double)ROBOT_WEEL_DISTANCE * 1000);
+			thisSystem.deltaTheta_rad = (dRmm - dLmm) / ((double)thisSystem.par.wheelDistance * 1000);
+			thisSystem.totaltravelDistance += thisSystem.deltaForward_m;
+
+			// delta spostamento in metri rispetto al frame /odom
+			thisSystem.deltaOdom_x = thisSystem.deltaForward_m * cos(thisSystem.odom_r);
+			thisSystem.deltaOdom_y = thisSystem.deltaForward_m * sin(thisSystem.odom_r);
+			
+			// spostamento laterale solo se DeltaX e Delta Tetha sono diversi da zero, ma non sembra funzionare
+			// if ((deltaForward_m!=0)&&(thisSystem.deltaTheta_rad!=0))
+			// {
+			// 	double deltaOdom_y = thisSystem.deltaForward_m * sin(thisSystem.odom_r);
+			// }
+			
+			///calculate current position of the robot vs /odom frame
+			thisSystem.odom_x += thisSystem.deltaOdom_x;
+			thisSystem.odom_y += thisSystem.deltaOdom_y;
+			thisSystem.odom_r += thisSystem.deltaTheta_rad; //thisSystem.odom_r += deltaTheta_rad;
+			if (thisSystem.odom_r > 2 * M_PI)
+			{
+				thisSystem.odom_r -= 2 * M_PI;
+			}
+			
+			
+
+			/// compute velocity------------------------------------------
+			current_time_encoder = ros::Time::now();
+			ros::Duration dt = current_time_encoder - last_time_encoder;
+			float dtSec = dt.toSec();
+			thisSystem.vel_x = thisSystem.deltaOdom_x / dtSec;
+			thisSystem.vel_y = thisSystem.deltaOdom_y / dtSec;
+			thisSystem.twist_z = thisSystem.deltaTheta_rad / dtSec; //				thisSystem.twist_z = deltaTheta_rad / dtSec;
+
+			last_time_encoder = current_time_encoder;
+
+			//ROS_INFO("x: %f, y: %f, th: %f,\t Delta Forward %f \t Delta rotation Rad: %f", thisSystem.odom_x, thisSystem.odom_y, thisSystem.odom_r, thisSystem.deltaForward_m, thisSystem.deltaTheta_rad);
+
+		}
+		else
+		{
+			//printf("\nDelta motion mm %f < soglia di %f\t",deltaMotion,distThreshold_mm);
+			thisSystem.vel_x  =0.0;
+			thisSystem.vel_x  =0.0;
+			thisSystem.twist_z =0.0;
+		}
+
+	} // end robotPoseupdate()
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+/// GESTIONE  MSG_ODOM
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+	nav_msgs::Odometry msg_odom;
+	void msg_odom_init(){
+		msg_odom.header.frame_id = "odom";
+		msg_odom.child_frame_id = "base_link";
+
+		// richiede c++ 11 , ovvero in cmakeList va aggiunto: set(CMAKE_CXX_FLAGS "-std=c++11")
+		// serve per EKF sensor fusion
+		msg_odom.pose.covariance = {
+			0.0025, 0.0, 0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0025, 0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0, 999999, 0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0, 999999, 0.0, 0.0,
+			0.0, 0.0, 0.0, 0.0, 999999, 0.0,
+			0.0, 0.0, 0.0, 0.0, 0.0, 999999};
+		msg_odom.twist.covariance = {
+			999999, 0.0, 0.0, 0.0, 0.0, 0.0,
+			0.0, 999999, 0.0, 0.0, 0.0, 0.0,
+			0.0, 0.0, 999999, 0.0, 0.0, 0.0,
+			0.0, 0.0, 0.0, 999999, 0.0, 0.0,
+			0.0, 0.0, 0.0, 0.0, 999999, 0.0,
+			0.0, 0.0, 0.0, 0.0, 0.0, 999999};
+	}
+
+
+	// Fill Message odom-----------------------------------------------
+	void msg_odom_update(){
+		msg_odom.header.stamp=  current_time;  
+
+		msg_odom.pose.pose.position.x = thisSystem.odom_x;
+		msg_odom.pose.pose.position.y = thisSystem.odom_y;
+		msg_odom.pose.pose.position.z = 0.0;
+		msg_odom.pose.pose.orientation = tf::createQuaternionMsgFromYaw(thisSystem.odom_r);
+		/*   Alternativa  per ambiente arduino che non ha createQuaternionMsgFromYaw -----
+			msg_odom.pose.pose.orientation.x = 0;
+			msg_odom.pose.pose.orientation.y = 0;
+			msg_odom.pose.pose.orientation.z = sin(thisSystem.odom_r * 0.5);
+			msg_odom.pose.pose.orientation.w = cos(thisSystem.odom_r * 0.5);
+		*/
+		msg_odom.twist.twist.linear.x = thisSystem.vel_x;
+		msg_odom.twist.twist.linear.y = thisSystem.vel_y;
+		msg_odom.twist.twist.angular.z = thisSystem.twist_z;
+
+	}
+
+
+/// ///////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////
+///
+///	TargetPose
+///
+/// ///////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////
+	void cbk_targetPose(const geometry_msgs::Twist &msg){
+		ROS_INFO( "*** Ricevuto target pose Lin: %f, Ang: %f", msg.linear.x , msg.angular.z);
+		msg_spostamentoRichiesto.linear.x  =  msg.linear.x ;
+		msg_spostamentoRichiesto.angular.z =  (float)msg.angular.z * M_PI/180;
+		
+		//imposto la posizione finale 
+		targetTravel = thisSystem.totaltravelDistance + msg_spostamentoRichiesto.linear.x ;
+		targetAngleRad = thisSystem.odom_r + msg_spostamentoRichiesto.angular.z ;
+		
+		
+		// se ricevo una richiesta di spostamento null mi fermo
+		if ((msg_spostamentoRichiesto.linear.x + msg_spostamentoRichiesto.angular.z ) ==0.0)
+		{
+			geometry_msgs::Twist msg_stop;
+			msg_stop = msg_fill_cmdVel(0,0);
+			pub_cmdVel.publish(msg_stop);
+		}
+		
+		
+	}
+	
+/// ///////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////
+///
+///	TargetPose loop
+///
+/// ///////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////	
+void targetPoseControlLoop(float kpLin_, float kpAng_){
+			if(abs(msg_spostamentoRichiesto.linear.x) + abs(msg_spostamentoRichiesto.angular.z) > 0.0){
+			
+				// ---------- rotazione di x gradi------------------------------
+				if (msg_spostamentoRichiesto.angular.z !=0.0)
+				{
+					// misuro la rotazione da ricezione callback
+					 
+					float controlErrorAng = targetAngleRad - thisSystem.odom_r;
+					
+					// se sono vicino riduco l'intensità del controllo
+					if (abs(controlErrorAng) < 0.3)
+					{
+						kpAng_ = 0.1;
+					}					
+					// ok ma oscilla controlDemand = kpAng * sign(controlErrorAng); //kpAng * controlErrorAng ;
+					controlDemand = kpAng_ * controlErrorAng; //kpAng * controlErrorAng ;
+					
+
+					msg_cmdVel = msg_fill_cmdVel(0.0 , controlDemand);		
+					
+					if (abs(controlErrorAng ) > 0.01 ){
+					
+						pub_cmdVel.publish(msg_cmdVel);
+						printf("\nTargetAngleRad %f, controlError: %f \t ControlDemand:  %f \t kpAng_ : %f",targetAngleRad, controlErrorAng, controlDemand, kpAng_);			
+					}					
+					else{//termino se ho raggiunto la posizione
+						msg_cmdVel = msg_fill_cmdVel( 0.0 ,0.0);
+						pub_cmdVel.publish(msg_cmdVel);
+						msg_spostamentoRichiesto.angular.z = 0.0;
+						ROS_INFO("\t\t **POSIZIONE RAGGIUNTA**");
+						speech("fatto");
+					}
+				}
+				//----------------Lineare -------------------------------------
+ 				if (msg_spostamentoRichiesto.linear.x !=0.0)
+				{	
+									
+					float controlErrorLin = targetTravel - thisSystem.totaltravelDistance;	
+					// se sono vicino riduco l'intensità del controllo
+					if (abs(controlErrorLin) < 0.1)
+					{
+						kpLin_  = 0.1;
+					}	
+											
+					// controlDemand = kpLin *sign(controlErrorLin); //kpLin * controlErrorLin ;
+					controlDemand = kpLin_ * controlErrorLin;
+						
+
+					
+					msg_cmdVel = msg_fill_cmdVel( controlDemand,0.0);		
+													
+					if (abs(controlErrorLin ) > 0.01 ){
+					
+						pub_cmdVel.publish(msg_cmdVel);
+						printf("\nTargetTravel:%f, controlErrorLin: %f \t ControlDemand:  %f \tkpLin_ :%f",targetTravel,controlErrorLin, controlDemand,kpLin_);			
+
+					}
+					//termino se ho raggiunto la posizione
+					else
+					{
+						msg_cmdVel = msg_fill_cmdVel( 0.0 ,0.0);
+						pub_cmdVel.publish(msg_cmdVel);
+						msg_spostamentoRichiesto.linear.x = 0.0;
+						ROS_INFO("\t\t **POSIZIONE RAGGIUNTA**");
+						speech("fatto");
+					}
+					
+				}
+			
+			}
+
+}
+
+
+
+/// ///////////////////////////////////////////////////////////////
+/// ///////////////////////////////////////////////////////////////
+///
+///	MACRO DI CARICAMENTO PARAMETERS
+///
+/// ///////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////
+	std::string thisNs = "";
+	#if true
+		// PN : Parameter Name
+		// PVAR : Variabile del parametro
+		// D default value
+		std::string thisNode = NODENAME;
+		std::string thisPar = "";
+		#define LOAD_PARAMETER_INT(PN, PVAR, D)                                                    \
+			if (_nh.getParam(PN, PVAR))                               \
+			{                                                                                      \
+				printf("\n Loaded param: %s=%d ", PN, PVAR);                                         \
+			}                                                                                      \
+			else                                                                                   \
+			{                                                                                      \
+				PVAR = D;                                                                            \
+				printf("\n\tWarning parameter [%s] not found. using default value:  %d ", PN, PVAR); \
+			}		
+		#define LOAD_PARAMETER_FLOAT(PN, PVAR, D)                                                    \
+			if (_nh.getParam(PN, PVAR))                               \
+			{                                                                                      \
+				printf("\n Loaded param: %s=%f ", PN, PVAR);                                         \
+			}                                                                                      \
+			else                                                                                   \
+			{                                                                                      \
+				PVAR = D;                                                                            \
+				printf("\n\tWarning parameter [%s] not found. using default value:  %f ", PN, PVAR); \
+			}
+		#define LOAD_PARAMETER_BOOL(PN, PVAR, D)                                                                         \
+			if (_nh.getParam(thisNs + "/" + thisNode + "/" + PN, PVAR))                                                   \
+			{                                                                                                          \
+				printf("\n loaded param: %s=%d ", PN, PVAR);                                                             \
+			}                                                                                                          \
+			else                                                                                                       \
+			{                                                                                                          \
+				PVAR = D;                                                                                                \
+				printf("\n\t Warning, parameter [%s] not found. Using default value: %s ", PN, PVAR ? "true" : "false"); \
+			}
+		#define LOAD_PARAMETER_MSGSTRING(PN, PVAR, D)                                                              \
+			if (_nh.getParam(thisNs + "/" + thisNode + "/" + PN, PVAR.data))                                        \
+			{                                                                                                    \
+				printf("\n loaded param: %s=%s ", PN, PVAR.data.c_str());                                          \
+			}                                                                                                    \
+			else                                                                                                 \
+			{                                                                                                    \
+				PVAR.data = D;                                                                                     \
+				printf("\n\t Warning, parameter [%s] not found. Using default value: %s ", PN, PVAR.data.c_str()); \
+			}
+
+		#define _LOAD_PARAMETER_FLOAT(PN, PVAR, D)                                                    \
+			if (_nh.getParam(thisNs + "/" + thisNode + "/" + PN, PVAR))                               \
+			{                                                                                      \
+				printf("\n Loaded param: %s=%f ", PN, PVAR);                                         \
+			}                                                                                      \
+			else                                                                                   \
+			{                                                                                      \
+				PVAR = D;                                                                            \
+				printf("\n\tWarning parameter [%s] not found. using default value:  %f ", PN, PVAR); \
+			}
+
+	#endif
+
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// MAIN 
+/// ////////////////////////////////////////////////////////////////////////////////////////////	
+/// ////////////////////////////////////////////////////////////////////////////////////////////
+	int main(int argc, char **argv)
+	{
+		ros::init(argc, argv, "enc2odom");
+		ros::NodeHandle nh;
+		ros::NodeHandle _nh("~"); // nodo privato per i parametri
+		init_globalVars(); //integration layer
+
+		msg_odom_init();
+
+
+	
+		printf("\n -------------------------------Loading parameters -------------------------------");
+
+		/// Setting a parameter value during a launch file
+		/// <param name="param-name" value="param-value" />
+		//_nh.getParam("/enc2mm", thisSystem.par.enc2mm); printf("\n[enc2mm = %f]",thisSystem.par.enc2mm);
+
+		/// Load parameters -----------------------------------------------------------
+		LOAD_PARAMETER_FLOAT("enc2mm", thisSystem.par.enc2mm, 0.06048f);
+		LOAD_PARAMETER_FLOAT("rate", thisSystem.par.rosRate, 30);
+		LOAD_PARAMETER_FLOAT("dbg_throttle_odom_interval", thisSystem.par.dbg_throttle_odom_interval, 1.0);
+		LOAD_PARAMETER_FLOAT("dbg_throttle_enc_interval", thisSystem.par.dbg_throttle_enc_interval, 5.0);
+		LOAD_PARAMETER_FLOAT("wheeldistance", thisSystem.par.wheelDistance,ROBOT_WEEL_DISTANCE);
+
+		LOAD_PARAMETER_INT("queue_size", thisSystem.par.queue_size, 10);
+		
+		nh.param<float>("kp_lin", kpLin, 0.1);
+		nh.param<float>("kp_ang", kpAng, 0.5);
+		printf("Using kp_lin= %f , kp_ang= %f", kpLin,kpAng);
+
+		printf("\n ----------------------------End loading parameters ------------------------------\n\n");
+
+		// Publish & Subscriptions-------------------------------------------------
+		ros::Subscriber sub = nh.subscribe("encoders", 100, cbk_encoders);
+		ros::TransportHints().tcpNoDelay();
+
+		ros::Subscriber initialpose_sub = nh.subscribe("/initialpose", 1, cbk_setPose);
+		ros::Publisher odom_pub = nh.advertise<nav_msgs::Odometry>("odom", thisSystem.par.queue_size);
+		tf::TransformBroadcaster odom_broadcaster;
+
+
+		// Gestione target pose----------------------
+		ros::Subscriber sub_targetPose = nh.subscribe("/target_pose", 1, cbk_targetPose);
+		//ros::Publisher pub_cmdVel = nh.advertise<geometry_msgs::Twist>("/cmd_vel", thisSystem.par.queue_size);
+		pub_cmdVel = nh.advertise<geometry_msgs::Twist>("/cmd_vel", thisSystem.par.queue_size);
+		pub_chatter = nh.advertise<std_msgs::String>("/chatter", 1); //avvisa quando ha raggiunto la posizione
+		
+		
+		current_time = ros::Time::now();
+		//last_time = ros::Time::now();
+
+
+		ros::Rate r(thisSystem.par.rosRate);
+		ROS_INFO("STARTING LOOP");
+
+		while (nh.ok())
+		{
+			// il callback alimenta  thisSystem.encL.count
+
+			robotPoseupdate(); // calcola thisSystem.odom_x y r e velocità
+
+			current_time = ros::Time::now(); //allineo temporalmente  odom e tf 
+			msg_odom_update();
+
+			odom_pub.publish(msg_odom); //publish the message
+
+			publish_tf(thisSystem.odom_x, thisSystem.odom_y, thisSystem.odom_r);
+
+			ROS_INFO_THROTTLE(thisSystem.par.dbg_throttle_enc_interval,  "enc.count: L%d, R: %d", thisSystem.encL.count, thisSystem.encR.count);
+			ROS_INFO_THROTTLE( thisSystem.par.dbg_throttle_odom_interval,"Delta Odom  x: %f, y: %f, th: %f", thisSystem.deltaOdom_x, thisSystem.deltaOdom_y, thisSystem.deltaTheta_rad);
+			ROS_INFO_THROTTLE(thisSystem.par.dbg_throttle_odom_interval, "New Odom x: %f, y: %f, th: %f, \t totTravel: %f", thisSystem.odom_x, thisSystem.odom_y, thisSystem.odom_r,thisSystem.totaltravelDistance );
+			ROS_INFO_THROTTLE(thisSystem.par.dbg_throttle_odom_interval, "vel_x: %f, vel_y: %f, twist_z: %f", thisSystem.vel_x, thisSystem.vel_y, thisSystem.twist_z);
+
+
+			//------------------------------------------------------------------------------------------
+			// gestione controlTarget
+			//------------------------------------------------------------------------------------------		
+			targetPoseControlLoop(kpLin, kpAng);	
+
+			ros::spinOnce();
+			r.sleep();
+		}
+	}

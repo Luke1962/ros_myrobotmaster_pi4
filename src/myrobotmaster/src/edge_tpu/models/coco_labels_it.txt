@@ -1,0 +1,80 @@
+0  persona
+1  bicicletta
+2  automobile
+3  moto
+4  aeropplano
+5  autobus
+6  treno
+7  camion
+8  barca
+9  semaforo
+10  idrante
+12  segno di stop
+13  parchimetro
+14  panchina
+15  uccello
+16  gatto
+17  cane
+18  cavallo
+19  pecora
+20  mucca
+21  elefante
+22  orso
+23  zebra
+24  giraffa
+26  zaino
+27  ombrello
+30  borsa
+31  cravatta
+32  valigia
+33  frisbi
+34  sci
+35  snoboard
+36  palla sportiva
+37  kite
+38  mazza da baseball 
+39  guanto da besboal
+40  skateboard
+41  surfboard
+42  racchetta da tennis
+43  bottiglia
+45  bicchiere di vino
+46  tazza
+47  forchetta
+48  coltello
+49  cucchiaio
+50  ciotola
+51  banana
+52  mela
+53  panino
+54  arancia
+55  broccoli
+56  carota
+57  hot dog
+58  pizza
+59  ciambella
+60  torta
+61  sedia
+62  divano
+63  pianta in vaso
+64  letto
+66  tavolo da pranzo
+69  vater
+71  televisione
+72  laptop
+73  mouse
+74  telecomando
+75  tastiera
+76  telefono
+77  microonde
+78  forno
+79  tostapane
+80  lavello
+81  frigorifero
+83  libro
+84  orologio
+85  vaso
+86  forbici
+87  orsacchiotto di peluche
+88  asciuga capelli
+89  spazzolino da denti

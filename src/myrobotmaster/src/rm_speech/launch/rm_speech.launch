@@ -1,0 +1,8 @@
+<launch>
+
+
+
+  <node ns="robot" name="speech_node" pkg="rm_speech" type="rm_speech_node" output="screen">
+     <rosparam command="load" file="$(find rm_speech)/param/param.yaml" />
+  </node>
+</launch>

@@ -1,0 +1,31 @@
+<launch>
+  <!-- <master auto="start"/> -->
+   <!-- rimappa il topic al quale in nodo enc2odom è sottoscritto di default -->
+ <!--<remap from="/encoders" to="/esp32/encoders"/> -->
+
+<!--ricordati che se metti un namespace devi ricompilare il nodo dopo aver cambiato  thisNs = ""-->
+  <node     name="enc2odom" pkg="rm_enc2odom" type="enc2odom"  output="screen">
+	 
+     <param name="rate" value="30"/>
+    <!-- 
+    prove
+    <param name="enc2mm" value="0.066758844"/> troppo alto 
+    param name="enc2mm" value="0.064"/> troppo alto 
+     <param name="enc2mm" value="0.062"/> quasi bene ma va diminuito
+     <param name="enc2mm" value="0.06155"/> troppo alto ( dopo 10 giri è 15 ° in piu su 3600
+     <param name="enc2mm" value="0.061"/> quasi bene ma va aumentato
+     <param name="enc2mm" value="0.060"/> troppo basso
+    dopo un metro di percorso lineare circa gli encoder segnano 15800 circa 
+    -->
+	<param name="enc2mm" value="0.061293542"/>
+    <param name="queue_size" value="10"/> 
+    <param name="dbg_throttle_enc_interval" value="6" />
+    <param name="dbg_throttle_odom_interval" value="60" />
+	<param name="kp_lin" value="5" />
+	<param name="kp_ang" value="3" />
+	<param name="kd_lin" value="0.5" />
+	<param name="kd_ang" value="0.3" />
+
+  </node>
+</launch>
+

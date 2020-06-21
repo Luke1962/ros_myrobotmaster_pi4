@@ -1,0 +1,10 @@
+results_topic: "/dialogflow_client/results"
+requests_topic: "/dialogflow_client/requests"
+project_id: "robot-15de1"
+play_google_audio: false
+play_local_audio: true
+use_audio_server: true
+#server_name: "127.0.0.1"
+server_name: "192.168.43.219"
+port: 4444
+debug: true
